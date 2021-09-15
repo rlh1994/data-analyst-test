@@ -26,7 +26,7 @@ Field descriptions are in `DATA_DICTIONARY.md`.
 
 Please import these files and combine them into a single table which:
 
-  * has the structure `person_id, country, city, type_of_broadband_connection, name_of_isp, average_download_speed, average_upload_speed`
+  * has the structure `person_id, city, type_of_broadband_connection, name_of_isp, average_download_speed, average_upload_speed`
   * has 1 line per person (i.e. calculate a single average download and upload speed for each person)
   * only contains people in the cities 'Samsville' and 'Databury'
   * only contains download and upload measurements which have run successfully (i.e. put a filter on did_test_complete_successfully)
