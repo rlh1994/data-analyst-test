@@ -17,7 +17,7 @@ Using GitHub:
 2. Read `INSTRUCTIONS.md` and `DATA_DICTIONARY.md`.
 3. Make your changes to `R/samknows_data_analyst_tech_test.R`.
 4. Commit and push all changes to your private repository.
-5. Add `gabe-de-wit` and `kmeteyard` (SamKnows employees) to your private repository.
+5. Add `gabe-de-wit` (SamKnows employee) to your private repository.
 
 Not using GitHub:
 
