@@ -13,11 +13,12 @@ If you've stumbled across this repository and haven't applied for a job at SamKn
 
 Using GitHub:
 
-1. Fork this repository (as a private repository under your GitHub account).
-2. Read `INSTRUCTIONS.md` and `DATA_DICTIONARY.md`.
-3. Make your changes to `R/samknows_data_analyst_tech_test.R`.
-4. Commit and push all changes to your private repository.
-5. Add `gabe-de-wit` (SamKnows employee) to your private repository.
+1. Clone this repository.
+3. Read `INSTRUCTIONS.md` and `DATA_DICTIONARY.md`.
+4. Commit your changes to `R/samknows_data_analyst_tech_test.R`.
+5. Make a new private repository under your GitHub account.
+6. Push all changes to your private repository.
+7. Add `gabe-de-wit` (SamKnows employee) to your private repository.
 
 Not using GitHub:
 
