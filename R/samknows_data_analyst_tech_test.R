@@ -3,10 +3,13 @@
 library(tidyverse)
 library(lubridate)
 library(scales)
+library(reactable)
+library(reactablefmtr)
+library(htmltools)
 
 # Functions ---------------------------------------------------------------
 
-#' Prepare Speeds Data
+#' Prepare Speeds Data via aggregation
 #'
 #' @param data The dataframe of speed data
 #' @param req_success Do you require successful tests only?
@@ -45,8 +48,9 @@ prep_speeds <- function(data, req_success, min_date, max_date_excl, type = '', p
     return()
 }
 
-# Attempt to use SamKnows colours
-colours <- c(main = '#0049e6', sec = '#6772e5', third = '#1868fb', black = '#37383c', grey = '#5b6272')
+
+# Attempt to use SamKnows colours for bonus points
+colours <- c('#0049e6', '#6772e5', '#1868fb', '#37383c', '#5b6272')
 
 # Set Params --------------------------------------------------------------
 
@@ -60,6 +64,8 @@ percentile <- 0.6
 
 persons <- read_csv('data/details_for_each_person.csv', 
                     col_types = 'icfc') #using shorthand for column types
+
+#used up/downstream names out of habit
 ds_speed <- read_csv('data/download_speed_measurements.csv',
                      col_types = 'iTdl')
 us_speed <- read_csv('data/upload_speed_measurements.csv',
@@ -76,6 +82,7 @@ comb_data <- persons %>%
   left_join(ds_agg, by = c('person_id')) %>%
   left_join(us_agg, by = c('person_id'))
 
+write.csv(comb_data, 'output/combined_data_output.csv')
 
 # Data Quality Checks -----------------------------------------------------
 
@@ -89,6 +96,9 @@ speed_limits <- tibble::tribble(
                   )
 
 ## Individual Record Checks ------------------------------------------------
+
+# Check if any specific measurements are 10% above the expected max up/download rates for each product:
+
 ds_quality1 <- ds_speed %>%
   filter(did_test_complete_successfully) %>%
   left_join(persons, by = 'person_id') %>%
@@ -107,6 +117,9 @@ us_quality1 <- us_speed %>%
 
 
 ## Cross report issues -----------------------------------------------------
+
+# Check if there are any customers who have a vast majority of their records above/below the expected
+
 ds_quality2 <- ds_speed %>%
   filter(did_test_complete_successfully) %>%
   left_join(persons, by = 'person_id') %>%
@@ -116,7 +129,7 @@ ds_quality2 <- ds_speed %>%
   group_by(person_id) %>%
   summarise(average_too_speedy_mult = mean(too_speedy_ds_multiplier),
             perc_too_speedy = sum(too_speedy_ds_multiplier > 1.1)/n()) %>%
-  filter(perc_too_speedy > 0.9) # 90% of tests or more are over 1.1x faster than the expeted max
+  filter(perc_too_speedy > 0.9) # 90% of tests or more are over 1.1x faster than the expected max
 # 6 Customers probably are recorded as wrong product 
 
 
@@ -136,7 +149,7 @@ intersect(us_quality2$person_id, ds_quality2$person_id) # same 6 customers both 
 
 nrow(ds_quality1 %>% filter(!(person_id %in% ds_quality2$person_id))) # 0
 nrow(us_quality1 %>% filter(!(person_id %in% us_quality2$person_id))) # 0
-# It seems as the threshold set of 1.1, there are not any other unusual results (but could be some below 1.1 threshold)
+# It seems at the threshold set of 1.1, there are not any other unusual results (but could be some below 1.1 threshold)
 
 # What about the other way?
 ds_quality3 <- ds_speed %>%
@@ -174,13 +187,15 @@ ds_speed %>%
   facet_grid(name_of_isp~type_of_broadband_connection) +
   theme_bw() +
   theme(legend.position = 'top') +
-  scale_fill_manual(values = unname(colours)) +
+  scale_fill_manual(values = colours) +
   scale_x_continuous(labels = scales::percent_format()) +
   labs(x = 'Test Success Rate',
        y = 'Count of people',
        title = 'Distribution of test success rate by ISP and technology', 
        fill = 'ISP',
        caption = 'Useus have a better test success rate than Fibrelicious, \nhowever fibre has the best success rate overall')
+
+ggsave('output/test_success_rate_by_isp_product.png')
 
 ds_speed %>%
   group_by(person_id) %>%
@@ -192,7 +207,7 @@ ds_speed %>%
   facet_grid(city~type_of_broadband_connection) +
   theme_bw() +
   theme(legend.position = 'top') +
-  scale_fill_manual(values = unname(colours)) +
+  scale_fill_manual(values = colours) +
   scale_x_continuous(labels = scales::percent_format()) +
   labs(x = 'Test Success Rate',
        y = 'Count of people',
@@ -200,64 +215,220 @@ ds_speed %>%
        fill = 'City',
        caption = 'City seems to have little impact on test success rate')
 
+ggsave('output/test_success_rate_by_city_product.png')
 # Overall nothing to imply a data issue as such, just that the success differs by ISP and technology.
 
 
 ## Findings ----------------------------------------------------------------
 
-# Test success rate differs noticably by ISP and technology - not necessary a data quality issue but something to be aware of
+# Test success rate differs noticeably by ISP and technology - not necessary a data quality issue but something to be aware of
 # There are 6 customers who almost certainly have the wrong product recorded within the data (which aligns with what is in `simulate_test_data.R` I found after)
 # There are no other tests outside of expected (+10%) speed parameters
 # There are not duplicate customers
-# Test success rate does not vary noticably by city
+# Test success rate does not vary noticeably by city
 
 
 # Summarisation and Plots -------------------------------------------------
 
 # Tables
+#
+pivoted_data <- comb_data %>% 
+  filter(!(person_id %in% people_to_exclude)) %>%
+  group_by(type_of_broadband_connection, city, name_of_isp) %>%
+  summarise(across(starts_with('average'), .fns = list(min = min, mean = mean, max = max), .names = '{.fn}_{.col}'),
+            vol = n(),
+            .groups = 'drop') %>%
+  pivot_wider(names_from = name_of_isp, values_from = where(is.numeric))
+  
+# There is a smarter way to do this by making a function, but it would involve a lot of work 
+# dealing with the different column names (or probably easier just reformatting the data itself)
+# so I have just left the code duplicated with column name changes (as such only one is commented)
+ds_table <- reactable(pivoted_data %>% select(-contains('upload')), # filter to just download columns
+          columns = list( # define list of columns for the table and their formats
+            city = colDef(name = 'City'), 
+            type_of_broadband_connection = colDef(name = 'Technology'), 
+            min_average_download_speed_Fibrelicious = colDef(name = 'Min',
+                                                             format = colFormat(digits = 2), #2 decimal places
+                                                             aggregate = "min", # how to aggregate when grouped up
+                                                             header = function(value) { # put the unit in the header
+                                                               units <- div(style = "color: #999", "Mbps")
+                                                               div(title = value, value, units)}
+                                                             ),
+            mean_average_download_speed_Fibrelicious = colDef(name = 'Mean',
+                                                              format = colFormat(digits = 2),
+                                                              aggregate = "mean",
+                                                              header = function(value) {
+                                                                units <- div(style = "color: #999", "Mbps")
+                                                                div(title = value, value, units)}
+                                                              ), 
+            max_average_download_speed_Fibrelicious = colDef(name = 'Max',
+                                                             format = colFormat(digits = 2),
+                                                             aggregate = "max",
+                                                             header = function(value) {
+                                                               units <- div(style = "color: #999", "Mbps")
+                                                               div(title = value, value, units)}
+                                                             ),
+            min_average_download_speed_Useus = colDef(name = 'Min',
+                                                      format = colFormat(digits = 2),
+                                                      aggregate = "min",
+                                                      header = function(value) {
+                                                        units <- div(style = "color: #999", "Mbps")
+                                                        div(title = value, value, units)}
+                                                      ), 
+            mean_average_download_speed_Useus = colDef(name = 'Mean',
+                                                       format = colFormat(digits = 2),
+                                                       aggregate = "mean",
+                                                       header = function(value) {
+                                                         units <- div(style = "color: #999", "Mbps")
+                                                         div(title = value, value, units)}
+                                                        ), 
+            max_average_download_speed_Useus = colDef(name = 'Max',
+                                                      format = colFormat(digits = 2),
+                                                      aggregate = "max",
+                                                      header = function(value) {
+                                                        units <- div(style = "color: #999", "Mbps")
+                                                        div(title = value, value, units)}
+                                                      ),
+            vol_Fibrelicious = colDef(name = 'Volume',
+                                      aggregate = "sum"), 
+            vol_Useus = colDef(name = 'Volume',
+                               aggregate = "sum")
+          ),
+          columnGroups = list( # Create grouped column headers for the ISPs for nicer titles
+            colGroup(name = 'Fibrelicious (Download)', columns = c('min_average_download_speed_Fibrelicious', 'mean_average_download_speed_Fibrelicious', 'max_average_download_speed_Fibrelicious', 'vol_Fibrelicious')),
+            colGroup(name = 'Useus(Download)', columns = c('min_average_download_speed_Useus', 'mean_average_download_speed_Useus', 'max_average_download_speed_Useus', 'vol_Useus'))
+          ), 
+          groupBy = 'type_of_broadband_connection', # Group rows by type of product as this is a bigger impact over city
+          bordered = TRUE, striped = TRUE, highlight = TRUE, filterable = TRUE, # themeing stuff
+          theme = reactableTheme(
+            color = 'white',
+            backgroundColor = colours[4],
+            borderColor = colours[5],
+            stripedColor = colours[2],
+            highlightColor = colours[3],
+            style = list(fontFamily = "Segoe UI, Helvetica, Arial, sans-serif"),
+          )        
+          )
+# save table
+save_reactable(ds_table, 'output/download_speed_summary.html')
 
-#TODO
+us_table <- reactable(pivoted_data %>% select(-contains('download')),
+          columns = list(
+            city = colDef(name = 'City'), 
+            type_of_broadband_connection = colDef(name = 'Technology'), 
+            min_average_upload_speed_Fibrelicious = colDef(name = 'Min',
+                                                             format = colFormat(digits = 2),
+                                                             aggregate = "min",
+                                                             header = function(value) {
+                                                               units <- div(style = "color: #999", "Mbps")
+                                                               div(title = value, value, units)}
+            ),
+            mean_average_upload_speed_Fibrelicious = colDef(name = 'Mean',
+                                                              format = colFormat(digits = 2),
+                                                              aggregate = "mean",
+                                                              header = function(value) {
+                                                                units <- div(style = "color: #999", "Mbps")
+                                                                div(title = value, value, units)}
+            ), 
+            max_average_upload_speed_Fibrelicious = colDef(name = 'Max',
+                                                             format = colFormat(digits = 2),
+                                                             aggregate = "max",
+                                                             header = function(value) {
+                                                               units <- div(style = "color: #999", "Mbps")
+                                                               div(title = value, value, units)}
+            ),
+            min_average_upload_speed_Useus = colDef(name = 'Min',
+                                                      format = colFormat(digits = 2),
+                                                      aggregate = "min",
+                                                      header = function(value) {
+                                                        units <- div(style = "color: #999", "Mbps")
+                                                        div(title = value, value, units)}
+            ), 
+            mean_average_upload_speed_Useus = colDef(name = 'Mean',
+                                                       format = colFormat(digits = 2),
+                                                       aggregate = "mean",
+                                                       header = function(value) {
+                                                         units <- div(style = "color: #999", "Mbps")
+                                                         div(title = value, value, units)}
+            ), 
+            max_average_upload_speed_Useus = colDef(name = 'Max',
+                                                      format = colFormat(digits = 2),
+                                                      aggregate = "max",
+                                                      header = function(value) {
+                                                        units <- div(style = "color: #999", "Mbps")
+                                                        div(title = value, value, units)}
+            ),
+            vol_Fibrelicious = colDef(name = 'Volume',
+                                      aggregate = "sum"), 
+            vol_Useus = colDef(name = 'Volume',
+                               aggregate = "sum")
+          ),
+          columnGroups = list(
+            colGroup(name = 'Fibrelicious (Upload)', columns = c('min_average_upload_speed_Fibrelicious', 'mean_average_upload_speed_Fibrelicious', 'max_average_upload_speed_Fibrelicious', 'vol_Fibrelicious')),
+            colGroup(name = 'Useus(Upload)', columns = c('min_average_upload_speed_Useus', 'mean_average_upload_speed_Useus', 'max_average_upload_speed_Useus', 'vol_Useus'))
+          ), 
+          groupBy = 'type_of_broadband_connection',
+          bordered = TRUE, striped = TRUE, highlight = TRUE, filterable = TRUE,
+          theme = reactableTheme(
+            color = 'white',
+            backgroundColor = colours[4],
+            borderColor = colours[5],
+            stripedColor = colours[2],
+            highlightColor = colours[3],
+            style = list(fontFamily = "Segoe UI, Helvetica, Arial, sans-serif"),
+          )        
+)
+
+save_reactable(us_table, 'output/upload_speed_summary.html')
+
+# FINDINGS 
+# In general (as seen in the next plot) ADSL has a superior speed with Useus, regardless of city
+# However for VDSL and Fibre, the users of Fibrelicious have a high speed - with in both cases
+# customers in Samsville having higher speeds compared to those in Databury by c.15-20Mbps in VDSL and c.10-20Mbps on Fibre.
 
 # Plots
 comb_data %>%
   filter(!(person_id %in% people_to_exclude)) %>% # remove people with wrong product
   ggplot(aes(x = average_download_speed, y = name_of_isp, fill = name_of_isp)) +
-  geom_boxplot() +
-  facet_grid(city~type_of_broadband_connection, scales = 'free') +
+  geom_boxplot() + # shows spread of data and in this case how little overlap there is
+  facet_grid(city~type_of_broadband_connection, scales = 'free') + # free scales due to vastly different ranges per product
   theme_bw() +
   theme(legend.position = 'top',
-        text = element_text(colour = colours['black']),
-        plot.subtitle = element_text(colour = colours['grey'])) +
-  scale_fill_manual(values = unname(colours)) +
+        text = element_text(colour = colours[4]),
+        plot.subtitle = element_text(colour = colours[5])) +
+  scale_fill_manual(values = colours) +
   labs(x = 'Average Download Speed (Mbps)',
        y = 'Internet Service Provider',
        title = 'Average Download Speeds by ISP, City, and Technology', 
-       subtitle = 'Useus provide better speeds for ADSL, but Fibrelicious are faster on VDSL+Fibre.',
+       subtitle = 'Useus provide better speeds for ADSL, \nbut Fibrelicious are faster on VDSL+Fibre.',
        fill = 'ISP',
        caption = 'NOTE: x-axis scales are different per-technology') 
   
-
+ggsave('output/download_speed_comparison.png')
 
 # Question: If I am a consumer living in Databury and I have a Fibre connection, am I going to get a better/worse speed from Fibrelicious or from Useus? If so, how much better/worse?
-# Answer: Based on the graph, better speeds with Fibrelicious (as their name suggests), but ~40Mbps download.
+# Answer: Based on the graph, better speeds with Fibrelicious (as their name suggests), by about ~40Mbps download.
 
-# Day time impact
+# Day time impact - a little slow to producce.
 ds_speed %>%
   left_join(persons, by = 'person_id') %>%
   filter(did_test_complete_successfully,
          !(person_id %in% people_to_exclude)) %>%
-  mutate(time_of_day = `date<-`(time_of_measurement, '2000-01-01'),
-         dow = wday(time_of_measurement, label = TRUE)) %>%
+  mutate(time_of_day = `date<-`(time_of_measurement, '2000-01-01'), # this is a hack to get the axis format to just display hours as scale_time has less formatting options...
+         dow = wday(time_of_measurement, label = TRUE)) %>% # lubridate provides an ordered factor by default
   ggplot(aes(x = time_of_day, y = measured_download_speed_in_Mbps, group = name_of_isp, fill = name_of_isp)) +
   geom_smooth() +
   #geom_point(alpha = 0.2) + # absolutely useless do not do this.
   facet_grid(type_of_broadband_connection~dow, scales = 'free_y') +
   theme_bw() +
   theme(legend.position = 'top',
-        text = element_text(colour = colours['black']),
-        plot.subtitle = element_text(colour = colours['grey'])) +
+        text = element_text(colour = colours[4]),
+        plot.subtitle = element_text(colour = colours[5])) +
   scale_fill_manual(values = unname(colours[c(1, 4)])) +
   scale_x_datetime(labels = scales::date_format('%H')) +
+  # add lines at 6pm and 10pm for peak times
+  geom_vline(xintercept = ymd_hms(20000101180000), linetype = 'dashed', col = colours[2])+
+  geom_vline(xintercept = ymd_hms(20000101220000), linetype = 'dashed', col = colours[2])+
   labs(x = 'Hour of the Day',
        y = 'Download Speed (smoothed)',
        title = 'Download Speeds by time of day', 
@@ -265,3 +436,5 @@ ds_speed %>%
        Lower speed ISP for ADSL and VDSL seem to be more stable throughout the peak time',
        fill = 'ISP',
        caption = 'NOTE: y-axis scales are different per-technology')
+
+ggsave('output/time_of_day_comparison.png')
